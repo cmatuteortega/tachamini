@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TachaMini · Diario</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,400&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1a1108;
+    --paper: #f5f0e8;
+    --accent: #c8410a;
+    --accent2: #2a5f8f;
+    --cell-size: 52px;
+    --target-size: 32px;
+    --kept-bg: #c8f0cc;
+    --crossed-bg: #f5f0e8;
+    --over-bg: #ffd0cc;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 24px 16px 48px;
+    background-image: repeating-linear-gradient(0deg, transparent, transparent 31px, rgba(26,17,8,0.06) 31px, rgba(26,17,8,0.06) 32px);
+  }
+
+  header {
+    width: 100%; max-width: 560px;
+    display: flex; align-items: baseline; justify-content: space-between;
+    border-bottom: 2.5px solid var(--ink); padding-bottom: 10px; margin-bottom: 4px;
+  }
+  .masthead { font-family: 'Playfair Display', serif; font-size: 2rem; font-weight: 700; letter-spacing: -1px; }
+  .masthead span { color: var(--accent); font-style: italic; font-weight: 400; }
+  .date-line { font-family: 'DM Mono', monospace; font-size: 0.7rem; letter-spacing: 0.05em; opacity: 0.6; }
+  .tagline { width: 100%; max-width: 560px; font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.5; margin-bottom: 20px; font-weight: 500; }
+
+  .attempts-bar {
+    width: 100%; max-width: 560px;
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;
+  }
+  .attempts-label { font-family: 'DM Mono', monospace; font-size: 0.75rem; color: var(--accent); font-weight: 500; }
+  .timer-display  { font-family: 'DM Mono', monospace; font-size: 0.75rem; color: var(--accent2); font-weight: 500; }
+  .attempt-dots { display: flex; gap: 6px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--ink); background: transparent; transition: background 0.3s; }
+  .dot.used    { background: var(--accent); border-color: var(--accent); }
+  .dot.success { background: #2d7a3a; border-color: #2d7a3a; }
+
+  .game-area { width: 100%; max-width: 560px; display: flex; flex-direction: column; align-items: center; gap: 20px; }
+  #status-bar { font-family: 'DM Mono', monospace; font-size: 0.75rem; letter-spacing: 0.05em; min-height: 18px; text-align: center; }
+
+  /* ── BOARD LAYOUT ──
+     3×3 CSS grid:
+     [corner] [col targets]
+     [row targets] [5×5 cells]
+  */
+  #board-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  /* top row: spacer + col targets */
+  #col-targets {
+    display: flex;
+    margin-left: var(--target-size); /* align with grid */
+  }
+  /* middle: row targets + grid */
+  #grid-row {
+    display: flex;
+    align-items: stretch;
+  }
+  #row-targets {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-around;
+    width: var(--target-size);
+  }
+  #cell-grid {
+    display: grid;
+    grid-template-columns: repeat(5, var(--cell-size));
+    grid-template-rows:    repeat(5, var(--cell-size));
+    border: 2.5px solid var(--ink);
+    background: var(--ink);
+    gap: 1.5px;
+    user-select: none; -webkit-user-select: none;
+  }
+
+  /* ── CELLS ── */
+  .cell {
+    width: var(--cell-size); height: var(--cell-size);
+    background: var(--paper);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'DM Mono', monospace; font-size: 1.2rem; font-weight: 500;
+    color: var(--ink);
+    cursor: pointer;
+    position: relative;
+    transition: background 0.1s;
+    touch-action: manipulation;
+  }
+
+  /* states */
+  .cell.kept    { background: var(--kept-bg); }
+  .cell.crossed {
+    background: var(--crossed-bg);
+    color: rgba(26,17,8,0.25);
+  }
+  .cell.crossed::after {
+    content: '';
+    position: absolute;
+    left: 12%; right: 12%; top: 50%;
+    height: 2px;
+    background: var(--accent);
+    transform: translateY(-50%);
+    border-radius: 1px;
+  }
+
+  /* ── TARGET LABELS ── */
+  .target-row, .target-col {
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'DM Mono', monospace; font-size: 0.85rem; font-weight: 500;
+    color: rgba(26,17,8,0.45);
+    transition: font-weight 0.15s, color 0.15s, font-size 0.15s;
+  }
+  .target-row {
+    width: var(--target-size); height: var(--cell-size);
+  }
+  .target-col {
+    width: var(--cell-size); height: var(--target-size);
+  }
+  .target-row.solved, .target-col.solved {
+    font-weight: 700;
+    font-size: 1rem;
+    color: var(--ink);
+  }
+  .target-row.over, .target-col.over {
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 1rem;
+  }
+
+  /* ── CONTROLS ── */
+  .controls { display: flex; gap: 10px; width: 100%; justify-content: center; margin-top: 12px; }
+  button {
+    font-family: 'DM Sans', sans-serif; font-size: 0.78rem; font-weight: 500;
+    letter-spacing: 0.06em; text-transform: uppercase; padding: 10px 20px;
+    border: 2px solid var(--ink); background: transparent; color: var(--ink);
+    cursor: pointer; transition: all 0.15s;
+  }
+  button:hover { background: var(--ink); color: var(--paper); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: white; }
+  button.primary:hover { background: #a33208; border-color: #a33208; }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button:disabled:hover { background: transparent; color: var(--ink); }
+  button.primary:disabled:hover { background: var(--accent); color: white; }
+
+  /* legend */
+  .legend {
+    display: flex; gap: 20px;
+    font-family: 'DM Mono', monospace; font-size: 0.68rem;
+    opacity: 0.55; align-items: center;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-swatch {
+    width: 20px; height: 20px; border: 1.5px solid var(--ink);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.6rem; font-family: 'DM Mono', monospace;
+    position: relative;
+  }
+  .legend-swatch.cross { color: rgba(26,17,8,0.25); }
+  .legend-swatch.cross::after {
+    content: ''; position: absolute;
+    left: 10%; right: 10%; top: 50%; height: 1.5px;
+    background: var(--accent); transform: translateY(-50%);
+  }
+  .legend-swatch.keep { background: var(--kept-bg); }
+
+  /* ── OVERLAYS ── */
+  #result-overlay, #locked-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(26,17,8,0.88); z-index: 100;
+    align-items: center; justify-content: center;
+  }
+  #result-overlay.show, #locked-overlay.show { display: flex; animation: fadeIn 0.4s ease; }
+  @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+
+  .result-card, .locked-card {
+    background: var(--paper); padding: 36px 44px; text-align: center;
+    border: 3px solid var(--ink); max-width: 360px; width: 90%;
+  }
+  .result-card .emoji-big { font-size: 3rem; margin-bottom: 8px; }
+  .result-card .big, .locked-card .big { font-family: 'Playfair Display', serif; font-size: 2rem; font-weight: 700; line-height: 1; margin-bottom: 6px; }
+  .result-card .sub, .locked-card .sub { font-size: 0.85rem; opacity: 0.6; margin-bottom: 8px; }
+  .result-card .stat { font-family: 'DM Mono', monospace; font-size: 1rem; color: var(--accent); margin-bottom: 20px; }
+  .share-text, .locked-share {
+    font-family: 'DM Mono', monospace; font-size: 0.72rem;
+    background: rgba(26,17,8,0.06); padding: 12px; margin-bottom: 16px;
+    white-space: pre; line-height: 1.6; border: 1px solid rgba(26,17,8,0.15); text-align: left;
+  }
+  .share-btn { width: 100%; margin-bottom: 8px; }
+  .next-puzzle-info { font-family: 'DM Mono', monospace; font-size: 0.68rem; opacity: 0.5; margin-top: 12px; }
+  .countdown { font-family: 'DM Mono', monospace; font-size: 1.6rem; color: var(--accent); margin-bottom: 20px; }
+
+  @media (max-width: 480px) {
+    :root { --cell-size: 44px; --target-size: 24px; }
+    .masthead { font-size: 1.5rem; }
+    .result-card, .locked-card { padding: 28px 24px; }
+    .cell.crossed::after { left: 8%; right: 8%; }
+    .target-row, .target-col { font-size: 0.7rem; }
+    .target-row.solved, .target-col.solved,
+    .target-row.over, .target-col.over { font-size: 0.85rem; }
+  }
+  @media (max-width: 360px) {
+    :root { --cell-size: calc((100vw - 64px) / 5); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="masthead">Tacha<span>mini</span></div>
+  <div class="date-line" id="date-display"></div>
+</header>
+<div class="tagline">tacha los números · suma los objetivos</div>
+
+<div class="attempts-bar">
+  <span class="attempts-label" id="attempts-label">INTENTO 1 / 3</span>
+  <span class="timer-display"  id="timer-display">0:00</span>
+  <div class="attempt-dots">
+    <div class="dot" id="dot-0"></div>
+    <div class="dot" id="dot-1"></div>
+    <div class="dot" id="dot-2"></div>
+  </div>
+</div>
+
+<div class="game-area">
+  <div id="status-bar"></div>
+  <div id="board-wrap">
+    <div id="col-targets"></div>
+    <div id="grid-row">
+      <div id="row-targets"></div>
+      <div id="cell-grid"></div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item">
+      <div class="legend-swatch cross">5</div>
+      <span>tachado (no cuenta)</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-swatch keep">5</div>
+      <span>marcado (cuenta)</span>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="primary" id="btn-check" onclick="checkAttempt()">Comprobar</button>
+  </div>
+</div>
+
+<div id="result-overlay" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="result-card">
+    <div class="emoji-big" id="r-emoji"></div>
+    <div class="big"        id="r-title"></div>
+    <div class="sub"        id="r-sub"></div>
+    <div class="stat"       id="r-stat"></div>
+    <div class="share-text" id="r-share"></div>
+    <button class="primary share-btn" onclick="copyShare()">Copiar resultado 📋</button>
+    <button onclick="document.getElementById('result-overlay').classList.remove('show')">Ver puzzle ↓</button>
+    <div class="next-puzzle-info" id="next-puzzle-info"></div>
+  </div>
+</div>
+
+<div id="locked-overlay" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="locked-card">
+    <div class="big">Ya jugaste hoy</div>
+    <div class="sub">El próximo puzzle en:</div>
+    <div class="countdown" id="countdown">--:--:--</div>
+    <div class="locked-share" id="locked-share"></div>
+    <button class="primary share-btn" onclick="copyShare()">Copiar resultado 📋</button>
+    <button onclick="document.getElementById('locked-overlay').classList.remove('show')">Ver puzzle ↓</button>
+  </div>
+</div>
+
+<script>
+const SIZE = 5;
+const MAX_ATTEMPTS = 3;
+// cell states
+const EMPTY   = 0;
+const CROSSED = 1;  // tachado — doesn't count
+const KEPT    = 2;  // subrayado/marcado — counts toward sum
+
+// ══════════════════════════════════════════════════════════
+// SEEDED RNG
+// ══════════════════════════════════════════════════════════
+function mulberry32(seed) {
+  return function() {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function dateToSeed(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = Math.imul(31, h) + s.charCodeAt(i) | 0;
+  return h >>> 0;
+}
+
+// ══════════════════════════════════════════════════════════
+// PUZZLE GENERATION
+// ══════════════════════════════════════════════════════════
+function generatePuzzle(dateStr) {
+  const rng = mulberry32(dateToSeed(dateStr));
+
+  // 1. Fill 5×5 grid with random numbers 1-9
+  const grid = Array.from({length: SIZE}, () =>
+    Array.from({length: SIZE}, () => 1 + Math.floor(rng() * 9))
+  );
+
+  // 2. Randomly decide which cells to KEEP (others are crossed)
+  //    Ensure each row and col has at least 1 kept and 1 crossed
+  let kept;
+  do {
+    kept = Array.from({length: SIZE}, () =>
+      Array.from({length: SIZE}, () => rng() > 0.45)
+    );
+  } while (!validKeep(kept));
+
+  // 3. Compute row/col target sums from kept cells
+  const rowTargets = Array.from({length: SIZE}, (_, r) =>
+    grid[r].reduce((s, v, c) => s + (kept[r][c] ? v : 0), 0)
+  );
+  const colTargets = Array.from({length: SIZE}, (_, c) =>
+    grid.reduce((s, row, r) => s + (kept[r][c] ? row[c] : 0), 0)
+  );
+
+  return { grid, kept, rowTargets, colTargets };
+}
+
+function validKeep(kept) {
+  for (let r = 0; r < SIZE; r++) {
+    const row = kept[r];
+    if (row.every(v => v) || row.every(v => !v)) return false;
+  }
+  for (let c = 0; c < SIZE; c++) {
+    const col = kept.map(r => r[c]);
+    if (col.every(v => v) || col.every(v => !v)) return false;
+  }
+  return true;
+}
+
+// ══════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════
+let puzzle        = null;
+let todayKey      = '';
+// userState[r][c] = EMPTY | CROSSED | KEPT
+let userState     = Array.from({length:SIZE}, () => Array(SIZE).fill(EMPTY));
+let attemptsUsed  = 0;
+let attemptHistory= [];
+let gameOver      = false;
+let timerSecs     = 0;
+let timerInt      = null;
+let timerStarted  = false;
+let _shareStr     = '';
+
+// ══════════════════════════════════════════════════════════
+// RENDER
+// ══════════════════════════════════════════════════════════
+function renderBoard() {
+  const colTargets = document.getElementById('col-targets');
+  const rowTargets = document.getElementById('row-targets');
+  const cellGrid   = document.getElementById('cell-grid');
+  colTargets.innerHTML = '';
+  rowTargets.innerHTML = '';
+  cellGrid.innerHTML   = '';
+
+  // Col targets (top)
+  for (let c = 0; c < SIZE; c++) {
+    const ct = document.createElement('div');
+    ct.className = 'target-col';
+    ct.id = `ct-${c}`;
+    ct.textContent = puzzle.colTargets[c];
+    colTargets.appendChild(ct);
+  }
+
+  // Row targets (left) + cells
+  for (let r = 0; r < SIZE; r++) {
+    const rt = document.createElement('div');
+    rt.className = 'target-row';
+    rt.id = `rt-${r}`;
+    rt.textContent = puzzle.rowTargets[r];
+    rowTargets.appendChild(rt);
+
+    for (let c = 0; c < SIZE; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.id = `cell-${r}-${c}`;
+      cell.textContent = puzzle.grid[r][c];
+      cell.dataset.r = r; cell.dataset.c = c;
+      cell.addEventListener('click', () => handleCellClick(r, c));
+      cell.addEventListener('touchend', e => { e.preventDefault(); handleCellClick(r, c); });
+      cellGrid.appendChild(cell);
+    }
+  }
+
+  updateAllTargets();
+}
+
+function cellEl(r, c) { return document.getElementById(`cell-${r}-${c}`); }
+
+function renderCell(r, c) {
+  const el = cellEl(r, c);
+  if (!el) return;
+  el.className = 'cell';
+  const s = userState[r][c];
+  if (s === CROSSED) el.classList.add('crossed');
+  else if (s === KEPT) el.classList.add('kept');
+  el.textContent = puzzle.grid[r][c];
+}
+
+// ══════════════════════════════════════════════════════════
+// INTERACTION
+// ══════════════════════════════════════════════════════════
+function handleCellClick(r, c) {
+  if (gameOver) return;
+  startTimer();
+  // cycle: EMPTY → CROSSED → KEPT → EMPTY
+  userState[r][c] = (userState[r][c] + 1) % 3;
+  renderCell(r, c);
+  updateAllTargets();
+  saveState();
+}
+
+// ══════════════════════════════════════════════════════════
+// TARGET SUMS
+// ══════════════════════════════════════════════════════════
+function currentRowSum(r) {
+  // counts all cells that are NOT crossed (KEPT or EMPTY)
+  return userState[r].reduce((s, st, c) => s + (st !== CROSSED ? puzzle.grid[r][c] : 0), 0);
+}
+function currentColSum(c) {
+  return userState.reduce((s, row, r) => s + (row[c] !== CROSSED ? puzzle.grid[r][c] : 0), 0);
+}
+
+function updateAllTargets() {
+  for (let r = 0; r < SIZE; r++) {
+    const el = document.getElementById(`rt-${r}`);
+    const sum = currentRowSum(r);
+    const target = puzzle.rowTargets[r];
+    el.className = 'target-row';
+    if (sum === target) el.classList.add('solved');
+    else if (sum > target) el.classList.add('over');
+  }
+  for (let c = 0; c < SIZE; c++) {
+    const el = document.getElementById(`ct-${c}`);
+    const sum = currentColSum(c);
+    const target = puzzle.colTargets[c];
+    el.className = 'target-col';
+    if (sum === target) el.classList.add('solved');
+    else if (sum > target) el.classList.add('over');
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// CHECK ATTEMPT
+// ══════════════════════════════════════════════════════════
+function checkAttempt() {
+  if (gameOver) return;
+
+  const won = isSolved();
+  attemptsUsed++;
+  attemptHistory.push({ won, state: userState.map(row => [...row]) });
+  updateDots();
+  saveState();
+
+  if (won) {
+    // highlight all kept cells correct
+    for (let r = 0; r < SIZE; r++)
+      for (let c = 0; c < SIZE; c++)
+        if (userState[r][c] === KEPT) cellEl(r,c).style.background = 'var(--kept-bg)';
+    setTimeout(() => endGame(true), 500);
+  } else if (attemptsUsed >= MAX_ATTEMPTS) {
+    // Reveal solution
+    for (let r = 0; r < SIZE; r++)
+      for (let c = 0; c < SIZE; c++) {
+        userState[r][c] = puzzle.kept[r][c] ? KEPT : CROSSED;
+        renderCell(r, c);
+      }
+    updateAllTargets();
+    setTimeout(() => endGame(false), 600);
+  } else {
+    const left = MAX_ATTEMPTS - attemptsUsed;
+    flash(`Incorrecto — ${left} intento${left!==1?'s':''} restante${left!==1?'s':''}`);
+  }
+}
+
+function isSolved() {
+  // Only check that crossed cells match — kept/empty both count as "not crossed"
+  for (let r = 0; r < SIZE; r++)
+    for (let c = 0; c < SIZE; c++) {
+      const shouldCross = !puzzle.kept[r][c];
+      const isCrossed   = userState[r][c] === CROSSED;
+      if (shouldCross !== isCrossed) return false;
+    }
+  return true;
+}
+
+function flash(msg) {
+  const el = document.getElementById('status-bar');
+  el.textContent = msg;
+  setTimeout(() => el.textContent = '', 2500);
+}
+
+// ══════════════════════════════════════════════════════════
+// END GAME
+// ══════════════════════════════════════════════════════════
+function endGame(won) {
+  gameOver = true;
+  stopTimer();
+  document.getElementById('btn-check').disabled = true;
+  saveState();
+  _shareStr = buildShareStr(won);
+  setTimeout(() => showResult(won), 600);
+}
+
+function buildShareStr(won) {
+  const header = `TachaMini ${todayKey}`;
+  const res = won
+    ? `✅ Resuelto en ${attemptsUsed}/${MAX_ATTEMPTS} intento${attemptsUsed!==1?'s':''} · ${formatTime(timerSecs)}`
+    : `❌ Sin resolver (${MAX_ATTEMPTS}/${MAX_ATTEMPTS} intentos) · ${formatTime(timerSecs)}`;
+  const last = attemptHistory.length ? attemptHistory[attemptHistory.length-1] : null;
+  let grid = '';
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      if (!last) { grid += '⬛'; continue; }
+      const correct = (last.state[r][c] === CROSSED) === !puzzle.kept[r][c];
+      grid += correct ? '🟩' : '🟥';
+    }
+    grid += '\n';
+  }
+  return `${header}\n${res}\n\n${grid.trim()}`;
+}
+
+function showResult(won) {
+  document.getElementById('r-emoji').textContent = won ? '🎉' : '😔';
+  document.getElementById('r-title').textContent = won ? '¡Resuelto!' : 'Mañana será';
+  document.getElementById('r-sub').textContent   = won ? 'Sumas completadas' : 'Se ha revelado la solución';
+  document.getElementById('r-stat').textContent  = won
+    ? `${attemptsUsed} intento${attemptsUsed!==1?'s':''} · ${formatTime(timerSecs)}`
+    : formatTime(timerSecs);
+  document.getElementById('r-share').textContent = _shareStr;
+  document.getElementById('next-puzzle-info').textContent = `Próximo puzzle en ${fmtCountdown(msToMidnight())}`;
+  document.getElementById('result-overlay').classList.add('show');
+}
+
+// ══════════════════════════════════════════════════════════
+// DOTS / TIMER / UTILS
+// ══════════════════════════════════════════════════════════
+function updateDots() {
+  for (let i = 0; i < MAX_ATTEMPTS; i++) {
+    const dot = document.getElementById(`dot-${i}`);
+    dot.className = 'dot';
+    if (i < attemptHistory.length) dot.classList.add(attemptHistory[i].won ? 'success' : 'used');
+  }
+  document.getElementById('attempts-label').textContent =
+    gameOver ? 'FIN' : `INTENTO ${attemptsUsed+1} / ${MAX_ATTEMPTS}`;
+}
+
+function startTimer() {
+  if (timerStarted) return;
+  timerStarted = true;
+  timerInt = setInterval(() => {
+    timerSecs++;
+    document.getElementById('timer-display').textContent = formatTime(timerSecs);
+  }, 1000);
+}
+function stopTimer()   { clearInterval(timerInt); timerInt = null; }
+function formatTime(s) { const m=Math.floor(s/60),ss=s%60; return `${m}:${String(ss).padStart(2,'0')}`; }
+
+function copyShare() {
+  const text = _shareStr || document.getElementById('locked-share').textContent;
+  const fb = () => document.querySelectorAll('.share-btn').forEach(b => {
+    const o=b.textContent; b.textContent='¡Copiado! ✓'; setTimeout(()=>b.textContent=o,2000);
+  });
+  if (navigator.clipboard && window.isSecureContext)
+    navigator.clipboard.writeText(text).then(fb).catch(()=>fallbackCopy(text,fb));
+  else fallbackCopy(text, fb);
+}
+function fallbackCopy(text, cb) {
+  const ta=document.createElement('textarea'); ta.value=text; ta.style.cssText='position:fixed;opacity:0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); if(cb)cb(); } catch(e){ alert('Copia el texto manualmente.'); }
+  document.body.removeChild(ta);
+}
+
+function msToMidnight() { const n=new Date(),m=new Date(n); m.setHours(24,0,0,0); return m-n; }
+function fmtCountdown(ms) {
+  const t=Math.floor(ms/1000),h=Math.floor(t/3600),m=Math.floor((t%3600)/60),s=t%60;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+function startCountdown() {
+  const el=document.getElementById('countdown');
+  const tick=()=>el.textContent=fmtCountdown(msToMidnight());
+  tick(); setInterval(tick,1000);
+}
+
+// ══════════════════════════════════════════════════════════
+// LOCALSTORAGE
+// ══════════════════════════════════════════════════════════
+function saveState() {
+  localStorage.setItem('tachomini_state', JSON.stringify({
+    date:todayKey, userState, attemptsUsed, attemptHistory, gameOver, timerSecs
+  }));
+}
+function loadState() {
+  try {
+    const s=JSON.parse(localStorage.getItem('tachomini_state'));
+    return (s&&s.date===todayKey) ? s : null;
+  } catch(e){ return null; }
+}
+function restoreState(s) {
+  userState      = s.userState || userState;
+  attemptsUsed   = s.attemptsUsed || 0;
+  attemptHistory = s.attemptHistory || [];
+  gameOver       = s.gameOver || false;
+  timerSecs      = s.timerSecs || 0;
+  document.getElementById('timer-display').textContent = formatTime(timerSecs);
+  for (let r=0;r<SIZE;r++) for (let c=0;c<SIZE;c++) renderCell(r,c);
+  updateAllTargets();
+  updateDots();
+  if (gameOver) document.getElementById('btn-check').disabled = true;
+}
+
+// ══════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+  const now=new Date();
+  const y=now.getFullYear(), m=String(now.getMonth()+1).padStart(2,'0'), d=String(now.getDate()).padStart(2,'0');
+  todayKey=`${y}-${m}-${d}`;
+  document.getElementById('date-display').textContent =
+    now.toLocaleDateString('es-ES',{weekday:'short',day:'numeric',month:'long',year:'numeric'}).toUpperCase();
+  document.getElementById('status-bar').textContent='⏳ Generando puzzle...';
+  setTimeout(()=>{
+    puzzle=generatePuzzle(todayKey);
+    document.getElementById('status-bar').textContent='';
+    renderBoard();
+    updateDots();
+    const saved=loadState();
+    if (saved&&saved.gameOver) {
+      restoreState(saved);
+      _shareStr=buildShareStr(saved.attemptHistory.some(a=>a.won));
+      document.getElementById('locked-share').textContent=_shareStr;
+      setTimeout(()=>{document.getElementById('locked-overlay').classList.add('show');startCountdown();},400);
+      return;
+    }
+    if (saved) restoreState(saved);
+  },30);
+});
+</script>
+</body>
+</html>
